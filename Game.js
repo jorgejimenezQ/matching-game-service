@@ -20,6 +20,7 @@ export default class Game {
   height = 3
   sessionId
   pairsRemaining = (8 * 3) / 2
+  isInvite = false
 
   constructor() {
     this.players = {}
@@ -27,7 +28,11 @@ export default class Game {
     this.numberOfPlayers = 0
 
     this.cardIndexes = []
-    // Generate an array from the available cards
+
+    this.newCards()
+  }
+
+  newCards() {
     // and shuffle it
     for (let i = 0; i < (this.width * this.height) / 2; i++) {
       const ran = Math.floor(Math.random() * this.availableCards.length)
@@ -36,7 +41,7 @@ export default class Game {
     }
 
     // Shuffle the array
-    this.cardIndexes = this.cardIndexes.sort(() => Math.random() - 0.5)
+    // this.cardIndexes = this.cardIndexes.sort(() => Math.random() - 0.5)
   }
 
   addPlayer(playerId, username, connectionId) {
@@ -44,6 +49,7 @@ export default class Game {
       username: username,
       score: 0,
       connectionId: connectionId,
+      ready: false,
     }
     this.numberOfPlayers++
   }

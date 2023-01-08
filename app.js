@@ -47,40 +47,64 @@ io.on('connection', (socket) => {
     console.log('player disconnected: ', games)
   })
 
+  socket.on('playerReady', (callback) => {
+    const game = games[socket.sessionId]
+    if (!game) return
+    const player = game.players[socket.connectionId]
+    if (!player) return
+    player.ready = true
+
+    if (game.gameFull()) {
+      // Check if both players are ready
+      const playerKeys = Object.keys(game.players)
+      const ready = playerKeys.every((key) => game.players[key].ready)
+      const firstPlayer = playerKeys[Math.floor(Math.random() * playerKeys.length)]
+
+      // If all players are ready, start the game
+      if (ready) {
+        // Start the game
+        io.to(socket.sessionId).emit('startGame', {
+          players: game.players,
+          firstPlayer,
+        })
+      }
+    }
+
+    callback({ players: player.connectionId })
+  })
+
   // Finds a game for the player. If there is no game available, it creates a new one
   socket.on('join', (data, callback) => {
-    const username = data
-    let game = findAvailableGame()
+    const username = data.username
+    const isInvite = data.isInvite
+    const sessionId = data.sessionId
+    const createInvite = data.createInvite
+    let game = null
+
+    // If the player is invited to a game, find the game
+    // Otherwise, find an available game
+    if (isInvite) game = games[sessionId]
+    else if (!createInvite) game = findAvailableGame()
+
     if (!game) {
       game = new Game()
       games[game.sessionId] = game
+
+      // Is this an invite?
+      if (createInvite) game.isInvite = true
     }
 
-    console.log('game', game)
-
-    // Add the player to the game
-    game.addPlayer(socket.connectionId, username, socket.connectionId)
+    // If the player is already in the game, don't add them again
+    if (!game.players[socket.connectionId])
+      game.addPlayer(socket.connectionId, username, socket.connectionId)
     socket.join(game.sessionId)
     socket.sessionId = game.sessionId
-    // If the game is full, start the game
-    if (game.gameFull()) {
-      // Choose a random player to start the game
-      const playerKeys = Object.keys(game.players)
-      const firstPlayer = playerKeys[Math.floor(Math.random() * playerKeys.length)]
-      console.log('firstPlayer', firstPlayer)
-
-      io.to(socket.sessionId).emit('startGame', {
-        players: game.players,
-        firstPlayer,
-      })
-    }
 
     // Send the game to the player
     callback({ sessionId: game.sessionId, cardIndexes: game.cardIndexes })
   })
 
   socket.on('restartGame', () => {
-    console.log('restartGame')
     socket.emit('mainScene')
   })
 
@@ -106,18 +130,25 @@ io.on('connection', (socket) => {
       else if (playerOne.score === playerTwo.score) winner = 'draw'
       else winner = playerTwo
 
+      // If a game invite set players to not ready, so they can play again
+      if (game.isInvite) {
+        game.players[playerKeys[0]].ready = false
+        game.players[playerKeys[1]].ready = false
+      }
+
       // Wait two seconds before sending the winner
       setTimeout(() => {
         io.to(socket.sessionId).emit('gameOver', winner.connectionId)
         // Delete the game
-        delete games[socket.sessionId]
+
+        // If the game is not an invite, delete it
+        if (!game.isInvite) delete games[socket.sessionId]
       }, 2000)
 
       return
     }
   })
   socket.on('cardClick', (data) => {
-    console.log('cardClick', data)
     socket.to(socket.sessionId).emit('flipCard', data)
   })
 })
@@ -127,10 +158,22 @@ const findAvailableGame = () => {
   const keys = Object.keys(games)
   let game = null
   keys.forEach((key) => {
-    if (!games[key].gameFull()) {
+    if (!games[key].gameFull() && !games[key].isInvite) {
       game = games[key]
     }
   })
+  return game
+}
+
+const findInviteGame = (gameSession) => {
+  const keys = Object.keys(games)
+  let game = null
+  keys.forEach((key) => {
+    if (games[key].isInvite && games[key].sessionId === gameSession) {
+      game = games[key]
+    }
+  })
+
   return game
 }
 
