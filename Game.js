@@ -41,7 +41,7 @@ export default class Game {
     }
 
     // Shuffle the array
-    // this.cardIndexes = this.cardIndexes.sort(() => Math.random() - 0.5)
+    this.cardIndexes = this.cardIndexes.sort(() => Math.random() - 0.5)
   }
 
   addPlayer(playerId, username, connectionId) {
