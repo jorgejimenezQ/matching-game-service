@@ -9,6 +9,7 @@ import { createServer } from 'http'
 import { Server } from 'socket.io'
 import Game from './Game.js'
 import { captureRejectionSymbol } from 'events'
+import { v4 } from 'uuid'
 
 const app = express()
 // app.use(cors())
@@ -23,12 +24,26 @@ const io = new Server(httpServer, {
 })
 
 const games = {}
+let connections = []
+
+// const adminEventsEmitter = new EventEmitter()
+const adminConnections = new Map()
 
 io.use((socket, next) => {
   console.log('socket.handshake.auth', socket.handshake.auth)
-  const { connectionId } = socket.handshake.auth
+  const { connectionId, admin, key } = socket.handshake.auth
+
+  // If the connection has an admin key, it is an admin connection
+  if (admin) {
+    if (key === process.env.ADMIN_KEY) {
+      adminEventsEmitter.emit('adminConnected', socket)
+      adminConnections.set(socket.id, { socket })
+    }
+  }
+
   if (!connectionId) return next(new Error('invalid connectionId'))
   socket.connectionId = connectionId
+  connections.push(connectionId)
   console.log('player connected: ' + connectionId)
   next()
 })
@@ -44,6 +59,18 @@ io.on('connection', (socket) => {
         delete games[socket.sessionId]
       }
     }
+
+    // Filter out the disconnected player
+    connections = connections.filter((connection) => connection !== socket.connectionId)
+
+    if (adminConnections.has(socket.id)) {
+      // Delete it
+      adminConnections.delete(socket.id)
+    }
+
+    adminConnections.forEach((admin) => {
+      admin.socket.emit('admin_updateData', { games: games, connections: connections })
+    })
     console.log('player disconnected: ', games)
   })
 
@@ -69,6 +96,10 @@ io.on('connection', (socket) => {
         })
       }
     }
+
+    adminConnections.forEach((admin) => {
+      admin.socket.emit('admin_updateData', { games: games, connections: connections })
+    })
 
     callback({ players: player.connectionId })
   })
@@ -100,6 +131,10 @@ io.on('connection', (socket) => {
     socket.join(game.sessionId)
     socket.sessionId = game.sessionId
 
+    adminConnections.forEach((admin) => {
+      console.log(admin.socket.connectionId)
+      admin.socket.emit('admin_updateData', { games: games, connections: connections })
+    })
     // Send the game to the player
     callback({ sessionId: game.sessionId, cardIndexes: game.cardIndexes })
   })
@@ -136,6 +171,10 @@ io.on('connection', (socket) => {
         game.players[playerKeys[1]].ready = false
       }
 
+      adminConnections.forEach((admin) => {
+        admin.socket.emit('admin_updateData', { games: games, connections: connections })
+      })
+
       // Wait two seconds before sending the winner
       setTimeout(() => {
         io.to(socket.sessionId).emit('gameOver', winner.connectionId)
@@ -150,6 +189,28 @@ io.on('connection', (socket) => {
   })
   socket.on('cardClick', (data) => {
     socket.to(socket.sessionId).emit('flipCard', data)
+  })
+
+  socket.on('adminLogin', (data, callback) => {
+    console.log(data)
+    console.log(process.env.ADMIN_KEY)
+    if (data == process.env.ADMIN_KEY) {
+      const uid = v4()
+      adminConnections.set(socket.connectionId, { socket, uid })
+      callback({ success: true, message: null, games: games, connections: connections, uid: uid })
+    } else {
+      callback({ success: false, message: 'Unable to connect to admin server' })
+    }
+  })
+
+  socket.on('admin_getServerInfo', (data, callback) => {
+    console.log(data)
+    const admin = adminConnections.get(socket.connectionId)
+    if (admin && admin.uid === data) {
+      callback({ success: true, message: null, games: games, connections: connections })
+    } else {
+      callback({ success: false, message: 'Unable to connect to admin server' })
+    }
   })
 })
 
